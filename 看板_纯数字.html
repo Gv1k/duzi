@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>肚子说了算 · 数据看板</title>
+  <style>
+    :root{
+      --bg:#f6fbff;
+      --card:#ffffff;
+      --text:#1f2a37;
+      --sub:#6b7280;
+      --primary:#3b82f6;
+      --good:#10b981;
+      --shadow:0 10px 30px rgba(59,130,246,.08);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+      background:linear-gradient(180deg,#f8fcff 0%,#f4f9ff 100%);
+      color:var(--text);
+    }
+    .wrap{
+      max-width:980px;
+      margin:0 auto;
+      padding:28px 16px 40px;
+    }
+    .title{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+      margin-bottom:18px;
+    }
+    h1{
+      margin:0;font-size:26px;letter-spacing:.2px;
+    }
+    .sub{
+      color:var(--sub);font-size:14px;margin-top:4px;
+    }
+    .btn{
+      border:none;background:var(--primary);color:#fff;
+      padding:10px 14px;border-radius:12px;cursor:pointer;font-weight:600;
+      box-shadow:var(--shadow);
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:14px;
+    }
+    @media (max-width:900px){ .grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+    @media (max-width:560px){ .grid{grid-template-columns:1fr;} }
+    .card{
+      background:var(--card);
+      border-radius:var(--radius);
+      padding:18px 16px;
+      box-shadow:var(--shadow);
+      border:1px solid #eaf2ff;
+    }
+    .label{
+      color:var(--sub);font-size:13px;margin-bottom:8px;
+    }
+    .value{
+      font-size:32px;font-weight:800;line-height:1.2;
+      letter-spacing:.3px;
+    }
+    .ok{color:var(--good)}
+    .section{
+      margin-top:16px;
+      background:#fff;border:1px solid #eaf2ff;border-radius:var(--radius);
+      box-shadow:var(--shadow);padding:16px;
+    }
+    .section h2{
+      margin:0 0 10px;font-size:17px;
+    }
+    table{
+      width:100%;border-collapse:collapse;font-size:14px;
+    }
+    th,td{
+      text-align:left;padding:10px;border-bottom:1px solid #eef4ff;
+    }
+    th{color:#4b5563;font-weight:700;background:#f8fbff}
+    .muted{color:var(--sub)}
+    .err{
+      margin-top:12px;background:#fff2f2;color:#b91c1c;border:1px solid #fecaca;
+      border-radius:12px;padding:10px 12px;font-size:13px;display:none;
+      white-space:pre-wrap;
+    }
+    .warn{
+      margin-top:12px;background:#fffaf0;color:#92640a;border:1px solid #fde3a7;
+      border-radius:12px;padding:10px 12px;font-size:13px;display:none;
+      white-space:pre-wrap;
+    }
+    .foot{
+      margin-top:12px;color:var(--sub);font-size:12px;
+    }
+    .pill{
+      display:inline-block;padding:4px 8px;border-radius:999px;
+      background:#eef6ff;color:#2563eb;font-size:12px;font-weight:700;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">
+      <div>
+        <h1>📊 肚子说了算 · 数据看板</h1>
+        <div class="sub" id="lastUpdated">加载中...</div>
+      </div>
+      <button class="btn" id="refreshBtn">刷新数据</button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">今日 UV（DAU）</div>
+        <div class="value" id="dauToday">--</div>
+      </div>
+      <div class="card">
+        <div class="label">今日 PV</div>
+        <div class="value" id="pvToday">--</div>
+      </div>
+      <div class="card">
+        <div class="label">累计用户（总 UV）</div>
+        <div class="value ok" id="totalUsers">--</div>
+      </div>
+      <div class="card">
+        <div class="label">截至昨日累计用户</div>
+        <div class="value" id="totalUntilYesterday">--</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>最近 7 天趋势 <span class="pill">UV / PV</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>UV（去重用户）</th>
+            <th>PV（访问次数）</th>
+          </tr>
+        </thead>
+        <tbody id="trendBody">
+          <tr><td colspan="3" class="muted">加载中...</td></tr>
+        </tbody>
+      </table>
+      <div class="foot">说明：UV=distinct user_id，PV=count(*)，按自然日统计。</div>
+      <div class="warn" id="warnBox"></div>
+      <div class="err" id="errorBox"></div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://bxqkvbvjyszzfhmtrpra.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_RJMMiyXCR0bsqKcsutU_HQ_OwS4BkAR";
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => (n ?? 0).toLocaleString("zh-CN");
+    const userFieldCandidates = ["user_id", "userId", "uid", "visitor_id", "visitorId"];
+    const timeFieldCandidates = ["visited_at", "created_at", "inserted_at", "timestamp", "time", "date"];
+    // 实际表结构确认为: id, user_id, visited_at（与上面候选列表已经匹配，无需改字段名）
+
+    function showErr(msg) {
+      const box = $("errorBox");
+      box.style.display = "block";
+      box.textContent = msg;
+    }
+    function clearErr() {
+      const box = $("errorBox");
+      box.style.display = "none";
+      box.textContent = "";
+    }
+    function showWarn(msg) {
+      const box = $("warnBox");
+      box.style.display = "block";
+      box.textContent = msg;
+    }
+    function clearWarn() {
+      const box = $("warnBox");
+      box.style.display = "none";
+      box.textContent = "";
+    }
+
+    function renderRows(tbodyId, rows, emptyText, renderRow) {
+      const body = $(tbodyId);
+      body.innerHTML = "";
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="3" class="muted">${emptyText}</td></tr>`;
+        return;
+      }
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = renderRow(row);
+        body.appendChild(tr);
+      });
+    }
+
+    function getLocalDayKey(dateValue) {
+      const d = new Date(dateValue);
+      if (Number.isNaN(d.getTime())) return null;
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function getDayRangeLocal(offsetDays = 0) {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays, 0, 0, 0, 0);
+      const next = new Date(d);
+      next.setDate(next.getDate() + 1);
+      return { start: d.toISOString(), end: next.toISOString(), label: getLocalDayKey(d) };
+    }
+
+    function pickField(row, candidates) {
+      if (!row) return null;
+      for (const key of candidates) {
+        if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== null && row[key] !== undefined && String(row[key]).trim() !== "") {
+          return key;
+        }
+      }
+      return null;
+    }
+
+    function getFieldMap(rows) {
+      const sample = rows.find((row) => row && typeof row === "object") || {};
+      return {
+        userField: pickField(sample, userFieldCandidates) || "user_id",
+        timeField: pickField(sample, timeFieldCandidates) || "visited_at"
+      };
+    }
+
+    async function fetchVisits() {
+      const { data, error } = await sb
+        .from("visits")
+        .select("*")
+        .order("id", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
+    function buildStats(rows) {
+      const fields = getFieldMap(rows);
+      const todayRange = getDayRangeLocal(0);
+      const yesterdayStart = getDayRangeLocal(0).start;
+      const byDay = {};
+
+      for (let i = 6; i >= 0; i--) {
+        const day = getDayRangeLocal(-i).label;
+        byDay[day] = { uvSet: new Set(), pv: 0 };
+      }
+
+      const allUsers = new Set();
+      const usersBeforeToday = new Set();
+
+      rows.forEach((row) => {
+        const rawTime = row[fields.timeField];
+        const day = rawTime ? getLocalDayKey(rawTime) : null;
+        const userId = row[fields.userField];
+
+        if (userId) {
+          allUsers.add(String(userId));
+          if (!rawTime || new Date(rawTime) < new Date(todayRange.start)) {
+            usersBeforeToday.add(String(userId));
+          }
+        }
+
+        if (day && byDay[day]) {
+          byDay[day].pv += 1;
+          if (userId) byDay[day].uvSet.add(String(userId));
+        }
+      });
+
+      return {
+        fields,
+        dauToday: byDay[todayRange.label] ? byDay[todayRange.label].uvSet.size : 0,
+        pvToday: byDay[todayRange.label] ? byDay[todayRange.label].pv : 0,
+        totalUsers: allUsers.size,
+        totalUntilYesterday: usersBeforeToday.size,
+        trend: Object.keys(byDay).sort().map((day) => ({
+          day,
+          uv: byDay[day].uvSet.size,
+          pv: byDay[day].pv
+        }))
+      };
+    }
+
+    async function loadDashboard() {
+      clearErr();
+      clearWarn();
+      $("lastUpdated").textContent = "正在加载访问数据...";
+
+      try {
+        const visits = await fetchVisits();
+
+        if (visits.length === 0) {
+          showWarn(
+            "查询成功，但 visits 表返回了 0 条数据（没有报错）。\n" +
+            "这种情况几乎总是因为 Supabase 的 RLS 还没有为 SELECT 开放权限：\n" +
+            "网站首页用同一把 key 能 insert 成功，只代表 INSERT 策略是开的，\n" +
+            "看板需要的是单独的 SELECT 策略。\n\n" +
+            "去 Supabase 后台 SQL Editor 执行：\n" +
+            "create policy \"allow public read for dashboard\"\n" +
+            "on public.visits for select using (true);"
+          );
+        }
+
+        const stats = buildStats(visits);
+
+        $("dauToday").textContent = fmt(stats.dauToday);
+        $("pvToday").textContent = fmt(stats.pvToday);
+        $("totalUsers").textContent = fmt(stats.totalUsers);
+        $("totalUntilYesterday").textContent = fmt(stats.totalUntilYesterday);
+
+        renderRows("trendBody", stats.trend, visits.length ? "暂无趋势数据" : "visits 表暂无数据", (row) => {
+          return `<td>${row.day}</td><td>${fmt(row.uv)}</td><td>${fmt(row.pv)}</td>`;
+        });
+
+        const t = new Date();
+        $("lastUpdated").textContent = `最后更新：${t.toLocaleString("zh-CN")}（本地时区） · 数据来源：visits 表`;
+      } catch (e) {
+        console.error(e);
+        showErr(
+          "加载失败，常见原因：\n" +
+          "1) visits 表未开放 SELECT RLS 策略\n" +
+          "2) 字段名不是 user_id / visited_at（或 created_at）\n" +
+          "3) key 或 project URL 不对应\n\n" +
+          "错误详情：\n" + (e?.message || JSON.stringify(e))
+        );
+        $("lastUpdated").textContent = "加载失败";
+      }
+    }
+
+    $("refreshBtn").addEventListener("click", loadDashboard);
+    loadDashboard();
+    setInterval(loadDashboard, 60 * 1000); // 每分钟自动刷新一次
+  </script>
+</body>
+</html>
